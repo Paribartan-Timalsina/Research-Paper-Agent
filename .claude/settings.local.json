@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m compileall -q app/)",
+      "Bash(find . -type d -name __pycache__ -exec rm -rf {} +)"
+    ]
+  }
+}
