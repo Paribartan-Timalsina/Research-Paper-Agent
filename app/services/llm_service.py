@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -32,8 +31,28 @@ class LLMClient(ABC):
         full = prompt
         if schema_hint:
             full += f"\n\nReturn ONLY valid JSON matching this shape:\n{schema_hint}"
-        full += "\n\nNo prose, no markdown fences. JSON only."
+        full += "\n\nNo any starting text such as 'Here is the JSON:', no markdown fences. JSON only."
         raw = self.generate_text(full)
+        try:
+            return _parse_json(raw)
+        except json.JSONDecodeError as e:
+            raise LLMError(
+                "LLM returned invalid JSON",
+                details={"raw_preview": raw[:300]},
+            ) from e
+
+    def generate_chat_json(self, messages: list[dict[str, str]]) -> Any:
+        """Multi-turn chat returning JSON.
+
+        `messages` is a list of {"role": "system|user|assistant", "content": "..."} dicts.
+        Default impl serializes them and calls generate_text. Subclasses with native
+        chat APIs can override.
+        """
+        serialized = "\n\n".join(
+            f"[{m['role'].upper()}]\n{m['content']}" for m in messages
+        )
+        serialized += "\n\nRespond with ONLY valid JSON. No prose, no markdown fences."
+        raw = self.generate_text(serialized)
         try:
             return _parse_json(raw)
         except json.JSONDecodeError as e:
@@ -45,17 +64,9 @@ class LLMClient(ABC):
 
 def _parse_json(raw: str) -> Any:
     raw = raw.strip()
-    # Strip ```json fences if the model added them anyway.
-    m = re.search(r"```(?:json)?\s*(.*?)\s*```", raw, re.DOTALL)
-    if m:
-        raw = m.group(1)
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        # Last resort: find the first {...} or [...] block.
-        m = re.search(r"(\{.*\}|\[.*\])", raw, re.DOTALL)
-        if m:
-            return json.loads(m.group(1))
         raise
 
 
@@ -66,6 +77,20 @@ class MockLLM(LLMClient):
 
     def generate_text(self, prompt: str) -> str:
         p = prompt.lower()
+        # Chat agent: detect the system prompt and respond with a tool call once,
+        # then a final answer. We can't keep state, so use a simple heuristic:
+        # if a TOOL RESULT is already present, return final answer; otherwise tool call.
+        if "research-paper assistant" in p and "available tools" in p:
+            if "tool result" in p:
+                return json.dumps({
+                    "action": "answer",
+                    "content": "Mock answer based on the paper and tool results.",
+                })
+            return json.dumps({
+                "action": "tool",
+                "tool": "get_section",
+                "args": {"name": "abstract"},
+            })
         if "task plan" in p or "plan of tasks" in p:
             return json.dumps([
                 {"task": "summarize"},

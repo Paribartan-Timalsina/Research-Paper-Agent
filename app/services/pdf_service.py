@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import fitz  # PyMuPDF
 
@@ -13,6 +13,8 @@ from app.services.llm_service import llm
 class ExtractedPDF:
     title: str
     text: str
+    # (page_number_1_indexed, description) — populated only when with_figures=True
+    figures: list[tuple[int, str]] = field(default_factory=list)
 
 
 _WS = re.compile(r"[ \t]+")
@@ -27,6 +29,8 @@ _FIGURE_PROMPT = (
 
 
 def _clean(text: str) -> str:
+    # Postgres TEXT columns reject NUL bytes; some PDFs embed them in text streams.
+    text = text.replace("\x00", "")
     text = _WS.sub(" ", text)
     text = _MULTI_NL.sub("\n\n", text)
     return text.strip()
@@ -83,13 +87,14 @@ def extract_pdf(
         raise PDFParseError(f"PyMuPDF failed to open: {e}") from e
 
     pages: list[str] = []
+    figures: list[tuple[int, str]] = []
     guessed_title: str | None = None
 
     try:
         with doc:
             for i in range(doc.page_count):
                 page = doc.load_page(i)
-                page_text: str = page.get_text("text") or ""  # type: ignore[assignment]
+                page_text: str = page.get_text("text") or ""
                 if i == 0:
                     for line in page_text.splitlines():
                         line = line.strip()
@@ -99,6 +104,7 @@ def extract_pdf(
                 if with_figures:
                     for desc in _describe_page_figures(doc, page):
                         page_text += f"\n\n[FIGURE on page {i+1}]: {desc}"
+                        figures.append((i + 1, desc))
                 pages.append(page_text)
     except Exception as e:
         raise PDFParseError(f"PyMuPDF failed: {e}") from e
@@ -110,6 +116,7 @@ def extract_pdf(
     return ExtractedPDF(
         title=(guessed_title or fallback_title)[:500],
         text=cleaned,
+        figures=figures,
     )
 
 

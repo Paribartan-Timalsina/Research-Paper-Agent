@@ -19,3 +19,10 @@ class Paper(Base):
 
     tasks = relationship("AgentTask", back_populates="paper", cascade="all, delete-orphan")
     insight = relationship("Insight", back_populates="paper", uselist=False, cascade="all, delete-orphan")
+    conversations = relationship(
+        "Conversation", back_populates="paper", cascade="all, delete-orphan"
+    )
+    figures = relationship(
+        "PaperFigure", back_populates="paper", cascade="all, delete-orphan",
+        order_by="PaperFigure.page",
+    )

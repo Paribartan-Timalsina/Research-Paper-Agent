@@ -46,5 +46,12 @@ def session_scope() -> Iterator[Session]:
 
 def init_db() -> None:
     # Import models so they're registered on Base.metadata
-    from app.models import paper, task, insight  # noqa: F401
+    from app.models import (  # noqa: F401
+        conversation,
+        insight,
+        message,
+        paper,
+        paper_figure,
+        task,
+    )
     Base.metadata.create_all(bind=engine)

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_paper_or_404
 from app.core.exceptions import InvalidFileError
 from app.db.async_base import get_db_async
-from app.models import AgentTask, Insight, Paper
+from app.models import AgentTask, Insight, Paper, PaperFigure
 from app.schemas.agent import InsightOut, ResultsResponse, TaskOut
 from app.schemas.paper import UploadResponse
 from app.services.pdf_service import ExtractedPDF, extract_pdf
@@ -25,13 +25,21 @@ async def upload_paper(
         raise InvalidFileError("Only PDF files are accepted")
 
     content = await file.read()
-    # PDF parsing is CPU-bound (PyMuPDF). Don't block the event loop.
+
+    # PDF parsing is CPU-bound (PyMuPDF). Operating without blocking the event loop.
+    # with_figures=True triggers VLM calls per embedded image — slower but populates
+    # the figures table so the chat agent's describe_figure tool has data.
     parsed: ExtractedPDF = await asyncio.to_thread(
-        extract_pdf, content, file.filename,
+        extract_pdf, content, file.filename, False,
     )
 
     paper = Paper(title=parsed.title, filename=file.filename, raw_text=parsed.text)
     db.add(paper)
+    await db.flush()   # so paper.id is available for the figure rows
+
+    for page, desc in parsed.figures:
+        db.add(PaperFigure(paper_id=paper.id, page=page, description=desc))
+
     await db.commit()
     await db.refresh(paper)
 

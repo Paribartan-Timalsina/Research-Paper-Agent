@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import routes_agent, routes_papers
+from app.api import routes_agent, routes_chat, routes_papers
 from app.config import settings
 from app.core.error_handlers import register_exception_handlers
 from app.core.middleware import install_middleware
@@ -43,3 +43,4 @@ def health() -> dict:
 
 app.include_router(routes_papers.router)
 app.include_router(routes_agent.router)
+app.include_router(routes_chat.router)

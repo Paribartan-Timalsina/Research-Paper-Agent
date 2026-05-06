@@ -13,7 +13,7 @@ import json
 from typing import Any
 from uuid import UUID
 
-import redis
+from redis import Redis
 from redis.exceptions import RedisError
 
 from app.config import settings
@@ -21,7 +21,7 @@ from app.core.exceptions import ContextStoreError
 
 _TTL_SECONDS = 60 * 60 * 24  # 24h
 
-_redis = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+_redis = Redis.from_url(settings.redis_url, decode_responses=True)
 
 
 def _key(paper_id: UUID | str) -> str:

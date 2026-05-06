@@ -22,7 +22,7 @@ from app.tasks.paper_tasks import TASK_REGISTRY
 log = logging.getLogger(__name__)
 
 
-def start_agent(paper_id: UUID, goal: str = "") -> dict:
+def start_agent(paper_id: float, goal: str = "") -> dict:
     # 1. Load paper + plan
     with session_scope() as db:
         paper = db.get(Paper, paper_id)

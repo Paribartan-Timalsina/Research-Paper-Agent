@@ -52,6 +52,11 @@ class PaperNotFoundError(NotFoundError):
     message = "Paper not found"
 
 
+class ConversationNotFoundError(NotFoundError):
+    code = "conversation_not_found"
+    message = "Conversation not found"
+
+
 class InvalidFileError(AppException):
     code = "invalid_file"
     message = "Invalid file"

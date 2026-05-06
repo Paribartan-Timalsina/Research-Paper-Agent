@@ -22,7 +22,6 @@ def plan_tasks(goal: str, paper_text: str) -> list[str]:
     try:
         raw = llm.generate_json(prompt, schema_hint=_SCHEMA)
     except LLMError as e:
-        # Graceful degradation: fall back to the full default plan.
         log.warning("Planner LLM call failed, using default plan: %s", e)
         return list(ALLOWED_TASKS)
     except Exception as e:  # unexpected — surface so callers can handle

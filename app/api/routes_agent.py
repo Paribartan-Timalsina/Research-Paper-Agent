@@ -29,8 +29,6 @@ async def run_agent(
     # paper_id is in the body, not the path, so we can't reuse get_paper_or_404 here.
     if (await db.get(Paper, req.paper_id)) is None:
         raise PaperNotFoundError(details={"paper_id": str(req.paper_id)})
-    # start_agent is sync (sync DB session, sync Redis, sync planner LLM,
-    # Celery .apply_async). Run it off the event loop.
     result = await asyncio.to_thread(start_agent, req.paper_id, req.goal)
     return RunAgentResponse(**result)
 
