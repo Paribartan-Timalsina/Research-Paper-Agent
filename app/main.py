@@ -8,6 +8,7 @@ from app.api import routes_agent, routes_chat, routes_papers
 from app.config import settings
 from app.core.error_handlers import register_exception_handlers
 from app.core.middleware import install_middleware
+from app.db.async_base import init_vector_extension
 from app.db.base import init_db
 
 logging.basicConfig(
@@ -21,6 +22,8 @@ async def lifespan(app: FastAPI):
     del app
     # init_db is sync (CREATE TABLE via sync engine). Run off the loop.
     await asyncio.to_thread(init_db)
+    # Enable pgvector extension for embeddings.
+    await init_vector_extension()
     yield
 
 
