@@ -11,7 +11,9 @@ from app.db.async_base import get_db_async
 from app.models import AgentTask, Insight, Paper, PaperFigure
 from app.schemas.agent import InsightOut, ResultsResponse, TaskOut
 from app.schemas.paper import UploadResponse
+from app.services.llm_service import llm
 from app.services.pdf_service import ExtractedPDF, extract_pdf
+from app.services.rag_service import index_paper
 
 router = APIRouter(tags=["papers"])
 
@@ -42,6 +44,8 @@ async def upload_paper(
 
     await db.commit()
     await db.refresh(paper)
+
+    await index_paper(paper.id, db, llm)
 
     return UploadResponse(paper_id=paper.id, title=paper.title, char_count=len(paper.raw_text))
 

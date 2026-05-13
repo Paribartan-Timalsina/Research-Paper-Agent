@@ -26,6 +26,9 @@ class LLMClient(ABC):
     def describe_image(self, image_bytes: bytes, prompt: str) -> str:  # noqa: ARG002
         raise NotImplementedError("This LLM does not support vision")
 
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        raise NotImplementedError("This LLM does not support embeddings")
+
     def generate_json(self, prompt: str, schema_hint: str = "") -> Any:
         """Ask the LLM for JSON. Appends schema hint + strict instruction."""
         full = prompt
@@ -116,6 +119,10 @@ class MockLLM(LLMClient):
     def describe_image(self, image_bytes: bytes, prompt: str) -> str:
         return "Mock figure: a chart or diagram from the paper."
 
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        import random
+        return [[random.random() for _ in range(768)] for _ in texts]
+
 
 # ---------- Gemini ----------
 
@@ -154,6 +161,20 @@ class GeminiLLM(LLMClient):
         except Exception as e:
             raise LLMError(f"Gemini vision call failed: {e}") from e
         return resp.text or ""
+
+    def embed(self, texts: list[str]) -> list[list[float]]:  # type: ignore[reportUnusedFunction]
+        try:
+            resp = self._client.models.embed_content(  # type: ignore
+                model="text-embedding-004",
+                contents=texts,
+            )
+            result: list[list[float]] = []
+            for emb in (resp.embeddings or []):  # type: ignore
+                values = list(emb.values) if hasattr(emb, "values") else []
+                result.append(values)
+            return result
+        except Exception as e:
+            raise LLMError(f"Gemini embed call failed: {e}") from e
 
 
 # ---------- Factory ----------

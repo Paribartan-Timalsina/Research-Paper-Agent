@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -29,6 +30,13 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
     expire_on_commit=False,
 )
+
+
+async def init_vector_extension() -> None:
+    """Enable pgvector extension for embedding storage."""
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await db.commit()
 
 
 async def get_db_async() -> AsyncIterator[AsyncSession]:

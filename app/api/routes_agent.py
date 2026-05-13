@@ -17,6 +17,7 @@ from app.schemas.agent import (
     RunAgentResponse,
 )
 from app.services.llm_service import LLMClient
+from app.services.rag_service import retrieve
 
 router = APIRouter(tags=["agent"])
 
@@ -43,8 +44,10 @@ async def ask_question(
     if paper is None:
         raise PaperNotFoundError(details={"paper_id": str(req.paper_id)})
 
-    # MVP: pass (truncated) paper text as context. Swap for RAG later.
-    prompt = QA_PROMPT.format(question=req.question, context=paper.raw_text[:15000])
+    chunks = await retrieve(req.paper_id, req.question, db, llm, top_k=5)
+    context = "\n\n".join(c.content for c in chunks)
+
+    prompt = QA_PROMPT.format(question=req.question, context=context)
     answer = await asyncio.to_thread(
         llm.generate_json, prompt, '{"answer": "..."}',
     )

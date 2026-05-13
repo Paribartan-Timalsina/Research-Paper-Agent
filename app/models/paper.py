@@ -26,3 +26,7 @@ class Paper(Base):
         "PaperFigure", back_populates="paper", cascade="all, delete-orphan",
         order_by="PaperFigure.page",
     )
+    chunks = relationship(
+        "PaperChunk", back_populates="paper", cascade="all, delete-orphan",
+        order_by="PaperChunk.chunk_index",
+    )
