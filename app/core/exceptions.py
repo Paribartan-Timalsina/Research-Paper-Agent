@@ -39,8 +39,6 @@ class AppException(Exception):
         }
 
 
-# ---------- 4xx client errors ----------
-
 class NotFoundError(AppException):
     code = "not_found"
     message = "Resource not found"
@@ -74,8 +72,6 @@ class ValidationError(AppException):
     message = "Validation failed"
     status_code = 422
 
-
-# ---------- 5xx / agent errors ----------
 
 class LLMError(AppException):
     code = "llm_error"

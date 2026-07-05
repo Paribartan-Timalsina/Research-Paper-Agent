@@ -1,65 +1,39 @@
-"""ReAct-style chat agent.
+"""LangGraph ReAct chat agent.
 
-One user turn drives a short loop:
-    LLM(messages + tools) → JSON
-        action == "tool"   → run tool, feed result back, loop
-        action == "answer" → persist final answer, done
+One user turn = one agent.invoke(). The Postgres checkpointer (keyed by
+conversation_id) holds the agent's memory across turns, so we pass only the new
+user message each call. The Message table is kept as a UI read-model: we still
+write user / assistant-tool-call / tool-result / answer rows so GET
+/conversations/{id} and the Streamlit trace render unchanged.
 
-Sync (uses sync session_scope + sync LLM). Routes wrap with `asyncio.to_thread`.
+Sync; routes wrap it with asyncio.to_thread.
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 from uuid import UUID
 
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
+from langgraph.prebuilt import create_react_agent
+
+from app.agents.langgraph_tools import build_tools
 from app.agents.prompts import CHAT_SYSTEM_PROMPT
-from app.agents.tools import render_tool_list, run_tool
-from app.core.exceptions import LLMError
 from app.db.base import session_scope
+from app.db.checkpointer import get_checkpointer
 from app.models import Conversation, Message, MessageRole, Paper
-from app.services.llm_service import llm
+from app.services.chat_model import get_chat_model
 
 log = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 6
-HISTORY_TURNS_KEPT = 30  # keep last N messages from prior turns to bound prompt size
-
-
-def _llm_messages_from_history(history: list[Message]) -> list[dict[str, str]]:
-    """Convert persisted Message rows into the LLM's role/content format."""
-    out: list[dict[str, str]] = []
-    for m in history:
-        if m.role == MessageRole.USER:
-            out.append({"role": "user", "content": m.content})
-        elif m.role == MessageRole.ASSISTANT:
-            if m.tool_name:
-                # Replay a tool-call turn as the assistant's last action
-                payload = {"action": "tool", "tool": m.tool_name, "args": m.tool_args or {}}
-                out.append({"role": "assistant", "content": json.dumps(payload)})
-            else:
-                # Final answer turn
-                payload = {"action": "answer", "content": m.content}
-                out.append({"role": "assistant", "content": json.dumps(payload)})
-        elif m.role == MessageRole.TOOL:
-            out.append({
-                "role": "user",
-                "content": f"TOOL RESULT ({m.tool_name}): {m.content}",
-            })
-        # SYSTEM messages from history are ignored — system prompt is rebuilt each turn
-    return out
+# Each ReAct cycle is ~2 graph steps (model node + tool node).
+RECURSION_LIMIT = MAX_ITERATIONS * 2 + 1
 
 
 def chat_step(conversation_id: UUID, user_input: str) -> dict[str, Any]:
-    """Run one user turn end-to-end. Persists all new messages.
-
-    Returns: {
-        "answer": str,
-        "messages": [Message rows that were just appended (in order)],
-        "iterations": int,
-    }
-    """
+    """Run one user turn end-to-end, persisting all new messages."""
     with session_scope() as db:
         conv = db.get(Conversation, conversation_id)
         if conv is None:
@@ -67,131 +41,116 @@ def chat_step(conversation_id: UUID, user_input: str) -> dict[str, Any]:
         paper = db.get(Paper, conv.paper_id)
         if paper is None:
             raise ValueError(f"paper {conv.paper_id} not found")
+        paper_id = conv.paper_id
+        paper_title = paper.title
 
-        # Pull history (already ordered by created_at via the relationship)
-        history = list(conv.messages)[-HISTORY_TURNS_KEPT:]
-
-        # Persist the user's input first
         user_msg = Message(
             conversation_id=conversation_id,
             role=MessageRole.USER,
             content=user_input,
         )
         db.add(user_msg)
-        db.flush()    # so subsequent rows have created_at after this one
+        db.flush()
+        db.refresh(user_msg)
+        user_dict = _message_to_dict(user_msg)
 
-        # Build LLM context
-        llm_msgs: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": CHAT_SYSTEM_PROMPT.format(
-                    paper_title=paper.title,
-                    tool_list=render_tool_list(),
-                ),
-            },
-        ]
-        llm_msgs.extend(_llm_messages_from_history(history))
-        llm_msgs.append({"role": "user", "content": user_input})
+    agent = create_react_agent(
+        get_chat_model(),
+        build_tools(paper_id),
+        state_modifier=CHAT_SYSTEM_PROMPT.format(paper_title=paper_title),
+        checkpointer=get_checkpointer(),
+    )
+    config = {
+        "configurable": {"thread_id": str(conversation_id)},
+        "recursion_limit": RECURSION_LIMIT,
+    }
 
-        new_msgs: list[Message] = [user_msg]
-        final_answer: str | None = None
+    # The checkpointer accumulates history; everything after our input message
+    # this turn is new.
+    snapshot = agent.get_state(config)
+    prev_count = len((snapshot.values or {}).get("messages", [])) if snapshot else 0
 
-        for iteration in range(1, MAX_ITERATIONS + 1):
-            try:
-                decision = llm.generate_chat_json(llm_msgs)
-            except LLMError as e:
-                log.warning("LLM failed during chat: %s", e)
-                final_answer = f"(LLM error: {e.message})"
-                break
+    try:
+        result = agent.invoke({"messages": [HumanMessage(content=user_input)]}, config=config)
+        new_lc = result["messages"][prev_count + 1:]
+        new_rows = _persist_trace(conversation_id, new_lc)
+        answer = _final_text(new_lc)
+        iterations = sum(1 for m in new_lc if isinstance(m, AIMessage)) or 1
+    except GraphRecursionError:
+        log.warning("Chat agent hit recursion limit for conversation %s", conversation_id)
+        answer = "(agent reached max iterations without a final answer)"
+        new_rows = _persist_answer(conversation_id, answer)
+        iterations = MAX_ITERATIONS
 
-            action = (decision or {}).get("action")
+    return {
+        "answer": answer,
+        "messages": [user_dict, *new_rows],
+        "iterations": iterations,
+    }
 
-            if action == "answer":
-                content = (decision.get("content") or "").strip()
-                final_answer = content or "(empty answer)"
-                msg = Message(
-                    conversation_id=conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content=final_answer,
-                )
-                db.add(msg)
-                db.flush()
-                new_msgs.append(msg)
-                break
 
-            if action == "tool":
-                tool_name = decision.get("tool", "")
-                tool_args = decision.get("args") or {}
-
-                # Persist the assistant tool-call message
-                call_msg = Message(
-                    conversation_id=conversation_id,
-                    role=MessageRole.ASSISTANT,
-                    content="",
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                )
-                db.add(call_msg)
-                db.flush()
-                new_msgs.append(call_msg)
-
-                # Run the tool
-                result = run_tool(tool_name, tool_args, paper, db)
-                tool_msg = Message(
+def _persist_trace(conversation_id: UUID, lc_messages: list) -> list[dict[str, Any]]:
+    """Translate the turn's LangChain messages into Message rows for the UI."""
+    with session_scope() as db:
+        rows: list[Message] = []
+        for m in lc_messages:
+            if isinstance(m, AIMessage):
+                if m.tool_calls:
+                    for tc in m.tool_calls:
+                        rows.append(Message(
+                            conversation_id=conversation_id,
+                            role=MessageRole.ASSISTANT,
+                            content="",
+                            tool_name=tc.get("name"),
+                            tool_args=tc.get("args") or {},
+                        ))
+                else:
+                    content = _as_text(m.content)
+                    if content.strip():
+                        rows.append(Message(
+                            conversation_id=conversation_id,
+                            role=MessageRole.ASSISTANT,
+                            content=content,
+                        ))
+            elif isinstance(m, ToolMessage):
+                rows.append(Message(
                     conversation_id=conversation_id,
                     role=MessageRole.TOOL,
-                    content=result,
-                    tool_name=tool_name,
-                )
-                db.add(tool_msg)
-                db.flush()
-                new_msgs.append(tool_msg)
+                    content=_as_text(m.content),
+                    tool_name=getattr(m, "name", None),
+                ))
+        for r in rows:
+            db.add(r)
+        db.flush()
+        for r in rows:
+            db.refresh(r)
+        return [_message_to_dict(r) for r in rows]
 
-                # Feed back into LLM context for the next iteration
-                llm_msgs.append({
-                    "role": "assistant",
-                    "content": json.dumps({"action": "tool", "tool": tool_name, "args": tool_args}),
-                })
-                llm_msgs.append({
-                    "role": "user",
-                    "content": f"TOOL RESULT ({tool_name}): {result}",
-                })
-                continue
 
-            # Unknown action: bail with a friendly message
-            log.warning("Unknown LLM action: %r", action)
-            final_answer = "(agent returned an unknown action)"
-            msg = Message(
-                conversation_id=conversation_id,
-                role=MessageRole.ASSISTANT,
-                content=final_answer,
-            )
-            db.add(msg)
-            db.flush()
-            new_msgs.append(msg)
-            break
+def _persist_answer(conversation_id: UUID, answer: str) -> list[dict[str, Any]]:
+    with session_scope() as db:
+        row = Message(
+            conversation_id=conversation_id,
+            role=MessageRole.ASSISTANT,
+            content=answer,
+        )
+        db.add(row)
+        db.flush()
+        db.refresh(row)
+        return [_message_to_dict(row)]
 
-        else:
-            # Loop exhausted without an "answer" action
-            final_answer = "(agent reached max iterations without a final answer)"
-            msg = Message(
-                conversation_id=conversation_id,
-                role=MessageRole.ASSISTANT,
-                content=final_answer,
-            )
-            db.add(msg)
-            db.flush()
-            new_msgs.append(msg)
-            iteration = MAX_ITERATIONS
 
-        # Detach from session so callers can read fields after the session closes
-        for m in new_msgs:
-            db.refresh(m)
-        return {
-            "answer": final_answer or "",
-            "messages": [_message_to_dict(m) for m in new_msgs],
-            "iterations": iteration,
-        }
+def _final_text(lc_messages: list) -> str:
+    for m in reversed(lc_messages):
+        if isinstance(m, AIMessage):
+            text = _as_text(m.content)
+            if text.strip():
+                return text
+    return "(empty answer)"
+
+
+def _as_text(content: Any) -> str:
+    return content if isinstance(content, str) else str(content)
 
 
 def _message_to_dict(m: Message) -> dict[str, Any]:

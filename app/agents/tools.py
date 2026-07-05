@@ -1,12 +1,5 @@
-"""Tools the chat agent can call.
-
-Each tool takes (args: dict, paper: Paper, db_session) and returns a string.
-The string is fed back into the LLM as a tool result.
-
-To add a new tool:
-  1. Write a function that takes (args, paper, db) and returns a string.
-  2. Register it in TOOLS with a name, description, and arg shape.
-"""
+"""Tools the chat agent can call. Each takes (args, paper, db) and returns a
+string that is fed back into the LLM as a tool result."""
 from __future__ import annotations
 
 import re
@@ -27,14 +20,11 @@ class Tool:
     fn: Callable[[dict[str, Any], Paper, Session], str] = lambda *_: ""
 
     def render(self) -> str:
-        """Render tool spec for the system prompt."""
         arg_lines = "\n".join(f"      - {k}: {v}" for k, v in self.args.items())
         return f"  {self.name}: {self.description}\n    args:\n{arg_lines}" if self.args else (
             f"  {self.name}: {self.description}"
         )
 
-
-# ---------- Section extraction ----------
 
 _SECTION_ALIASES = {
     "abstract":     [r"\babstract\b"],
@@ -99,8 +89,6 @@ def get_section(args: dict[str, Any], paper: Paper, db: Session) -> str:  # noqa
     return f"--- Section: {name} ---\n{section}"
 
 
-# ---------- Citations ----------
-
 _CITE_SPLIT = re.compile(r"\n(?=\s*(?:\[\d+\]|\d+\.\s|\(\d+\)))")
 
 
@@ -114,8 +102,6 @@ def get_citations(args: dict[str, Any], paper: Paper, db: Session) -> str:  # no
     items = items[:30]   # cap to avoid huge dumps
     return "References:\n" + "\n".join(f"- {item[:300]}" for item in items)
 
-
-# ---------- Figure descriptions ----------
 
 def describe_figure(args: dict[str, Any], paper: Paper, db: Session) -> str:
     raw_page = args.get("page")
@@ -141,8 +127,6 @@ def describe_figure(args: dict[str, Any], paper: Paper, db: Session) -> str:
         return f"No figure on page {page}. Available pages with figures: {avail_pages}."
     return "\n".join(f"[Figure on page {f.page}]: {f.description}" for f in figs)
 
-
-# ---------- Registry ----------
 
 TOOLS: dict[str, Tool] = {
     "get_section": Tool(

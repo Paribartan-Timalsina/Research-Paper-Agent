@@ -31,8 +31,6 @@ from components import (
     render_task_progress,
 )
 
-# ---------- Page setup ----------
-
 st.set_page_config(
     page_title="Research Paper Agent",
     page_icon="📄",
@@ -56,12 +54,9 @@ def _init_state() -> None:
 _init_state()
 
 
-# ---------- Sidebar: paper selection / upload ----------
-
 with st.sidebar:
     st.title("Paper")
 
-    # Health check (small, helps debugging)
     try:
         h = health()
     except APIError as e:
@@ -96,8 +91,6 @@ with st.sidebar:
                     st.error(f"Upload failed: {e.body}")
 
 
-# ---------- Main area ----------
-
 if not st.session_state.paper_id:
     st.title("Research Paper Agent")
     st.info("Upload a paper from the sidebar to begin.")
@@ -107,8 +100,6 @@ tab_preview, tab_analyze, tab_chat, tab_qa = st.tabs(
     ["Preview", "Analyze", "Chat", "Q&A"]
 )
 
-
-# ---------- Tab 1: Preview ----------
 
 with tab_preview:
     if st.session_state.pdf_bytes:
@@ -125,8 +116,6 @@ with tab_preview:
             "to preview."
         )
 
-
-# ---------- Tab 2: Analyze ----------
 
 with tab_analyze:
     st.markdown(
@@ -172,15 +161,12 @@ with tab_analyze:
                 time.sleep(2)
 
 
-# ---------- Tab 2: Chat ----------
-
 with tab_chat:
     st.markdown(
         "Have a multi-turn conversation about the paper. The agent can call "
         "tools when it needs specifics. This can be more expensive than single-turn Q&A, but allows for more complex interactions and follow-ups."
     )
 
-    # Start / continue a conversation
     if not st.session_state.conversation_id:
         if st.button("Start new conversation", type="primary"):
             try:
@@ -195,7 +181,6 @@ with tab_chat:
             st.session_state.conversation_id = None
             st.rerun()
 
-        # Render history
         try:
             conv = get_conversation(st.session_state.conversation_id)
             render_chat_history(conv["messages"])
@@ -203,7 +188,6 @@ with tab_chat:
             st.error(f"Couldn't load conversation: {e.body}")
             st.stop()
 
-        # Input box
         user_input = st.chat_input("Ask a question about this paper…")
         if user_input:
             with st.chat_message("user"):
@@ -233,8 +217,6 @@ with tab_chat:
 
                 st.caption(f"({result['iterations']} iteration(s))")
 
-
-# ---------- Tab 3: Q&A ----------
 
 with tab_qa:
     st.markdown(

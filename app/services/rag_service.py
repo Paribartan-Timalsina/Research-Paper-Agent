@@ -1,9 +1,4 @@
-"""RAG (Retrieval-Augmented Generation) service for paper chunks.
-
-Provides:
-  - index_paper: chunk text, embed, store in DB with FTS index
-  - retrieve: hybrid search (semantic + keyword) via Reciprocal Rank Fusion
-"""
+"""RAG service for paper chunks: indexing and hybrid (semantic + keyword) retrieval."""
 from __future__ import annotations
 
 import asyncio

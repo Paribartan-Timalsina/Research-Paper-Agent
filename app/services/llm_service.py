@@ -1,9 +1,4 @@
-"""LLM abstraction. Two providers: `mock` (deterministic, offline) and `gemini`.
-
-Usage:
-    from app.services.llm_service import llm
-    data = llm.generate_json(prompt, schema_hint="...")
-"""
+"""LLM abstraction. Two providers: `mock` (deterministic, offline) and `gemini`."""
 from __future__ import annotations
 
 import json
@@ -73,8 +68,6 @@ def _parse_json(raw: str) -> Any:
         raise
 
 
-# ---------- Mock ----------
-
 class MockLLM(LLMClient):
     """Deterministic responses for offline dev and tests."""
 
@@ -124,8 +117,6 @@ class MockLLM(LLMClient):
         return [[random.random() for _ in range(768)] for _ in texts]
 
 
-# ---------- Gemini ----------
-
 class GeminiLLM(LLMClient):
     def __init__(self, api_key: str, model: str):
         # Imported lazily so the mock path works without the package.
@@ -162,22 +153,20 @@ class GeminiLLM(LLMClient):
             raise LLMError(f"Gemini vision call failed: {e}") from e
         return resp.text or ""
 
-    def embed(self, texts: list[str]) -> list[list[float]]:  # type: ignore[reportUnusedFunction]
+    def embed(self, texts: list[str]) -> list[list[float]]:
         try:
-            resp = self._client.models.embed_content(  # type: ignore
+            resp = self._client.models.embed_content(  
                 model="text-embedding-004",
                 contents=texts,
             )
             result: list[list[float]] = []
-            for emb in (resp.embeddings or []):  # type: ignore
+            for emb in (resp.embeddings or []):
                 values = list(emb.values) if hasattr(emb, "values") else []
                 result.append(values)
             return result
         except Exception as e:
             raise LLMError(f"Gemini embed call failed: {e}") from e
 
-
-# ---------- Factory ----------
 
 def _build_llm() -> LLMClient:
     if settings.llm_provider == "gemini":

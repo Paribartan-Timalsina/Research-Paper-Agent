@@ -121,7 +121,7 @@ def extract_pdf(
 
 
 def chunk_text(text: str, max_chars: int = 4000, overlap: int = 200) -> list[str]:
-    """Simple character chunker with overlap. Good enough for MVP retrieval."""
+    """Simple character chunker with overlap"""
     if len(text) <= max_chars:
         return [text]
     chunks = []

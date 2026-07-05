@@ -1,9 +1,4 @@
-"""Thin httpx wrapper around the FastAPI backend.
-
-All HTTP plumbing lives here. Streamlit code calls these functions and gets
-back plain dicts/lists. If we ever swap Streamlit for React, this file is
-what stays.
-"""
+"""Thin httpx wrapper around the FastAPI backend."""
 from __future__ import annotations
 
 import os
@@ -36,14 +31,10 @@ def _unwrap(resp: httpx.Response) -> Any:
     return resp.json()
 
 
-# ---------- Health ----------
-
 def health() -> dict:
     with _client() as c:
         return _unwrap(c.get("/health"))
 
-
-# ---------- Papers ----------
 
 def upload_paper(file_name: str, file_bytes: bytes, mime: str = "application/pdf") -> dict:
     """POST /upload-paper. Returns {paper_id, title, char_count}."""
@@ -57,8 +48,6 @@ def get_results(paper_id: str) -> dict:
     with _client() as c:
         return _unwrap(c.get(f"/paper/{paper_id}/results"))
 
-
-# ---------- Agent ----------
 
 def run_agent(paper_id: str, goal: str = "") -> dict:
     """POST /run-agent. Returns {paper_id, plan, chain_id}."""
@@ -77,8 +66,6 @@ def ask_question(paper_id: str, question: str) -> dict:
             "question": question,
         }))
 
-
-# ---------- Chat ----------
 
 def start_conversation(paper_id: str, title: str | None = None) -> dict:
     """POST /conversations. Returns {id, paper_id, title, created_at}."""

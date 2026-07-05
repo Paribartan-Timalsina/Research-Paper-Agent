@@ -10,6 +10,7 @@ from app.core.error_handlers import register_exception_handlers
 from app.core.middleware import install_middleware
 from app.db.async_base import init_vector_extension
 from app.db.base import init_db
+from app.db.checkpointer import get_checkpointer
 
 logging.basicConfig(
     level=settings.log_level,
@@ -24,6 +25,8 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(init_db)
     # Enable pgvector extension for embeddings.
     await init_vector_extension()
+    # Create the LangGraph checkpointer tables up front (idempotent).
+    await asyncio.to_thread(get_checkpointer)
     yield
 
 
